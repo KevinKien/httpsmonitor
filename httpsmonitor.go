@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -79,6 +80,46 @@ func checkDomain(domain string) {
 			}
 		}
 	}
+
+	checkSSLVersions(domain)
+}
+
+func checkSSLVersions(domain string) {
+	sslVersions := []struct {
+		version     string
+		tlsVersion  uint16
+	}{
+		{"SSLv3", tls.VersionSSL30},
+		{"TLS 1.0", tls.VersionTLS10},
+		{"TLS 1.1", tls.VersionTLS11},
+		{"TLS 1.2", tls.VersionTLS12},
+		{"TLS 1.3", tls.VersionTLS13},
+	}
+
+	for _, v := range sslVersions {
+		supported := checkTLSVersion(domain, v.tlsVersion)
+		status := "not supported"
+		if supported {
+			status = "supported"
+		}
+		fmt.Printf("Domain %s: %s %s\n", domain, v.version, status)
+		if !supported && v.tlsVersion == tls.VersionTLS13 {
+			sendTelegramNotification(domain, fmt.Sprintf("%s is not supported", v.version))
+		}
+	}
+}
+
+func checkTLSVersion(domain string, tlsVersion uint16) bool {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := tls.DialWithDialer(dialer, "tcp", domain+":443", &tls.Config{
+		MinVersion: tlsVersion,
+		MaxVersion: tlsVersion,
+	})
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	return true
 }
 
 func isCertExpiringSoon(cert *x509.Certificate) bool {
