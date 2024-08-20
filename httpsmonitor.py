@@ -5,6 +5,7 @@ import OpenSSL
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
+import socket
 
 # Load environment variables from .env file
 load_dotenv()
@@ -32,9 +33,41 @@ def check_domain(domain):
         x509 = OpenSSL.crypto.load_certificate(OpenSSL.crypto.FILETYPE_ASN1, cert)
         if is_cert_expiring_soon(x509):
             send_telegram_notification(domain, "Certificate expiring soon")
+
+        check_ssl_versions(domain)
+        
     except requests.RequestException as e:
         print(f"No HTTPS or error checking domain {domain}: {e}")
         send_telegram_notification(domain, "No HTTPS or error occurred")
+
+def check_ssl_versions(domain):
+    ssl_versions = [
+        ("SSLv3", ssl.PROTOCOL_SSLv3),
+        ("TLS 1.0", ssl.PROTOCOL_TLSv1),
+        ("TLS 1.1", ssl.PROTOCOL_TLSv1_1),
+        ("TLS 1.2", ssl.PROTOCOL_TLSv1_2),
+        ("TLS 1.3", ssl.PROTOCOL_TLS),
+    ]
+
+    for version_name, ssl_version in ssl_versions:
+        supported = check_tls_version(domain, ssl_version)
+        status = "supported" if supported else "not supported"
+        print(f"Domain {domain}: {version_name} {status}")
+        if not supported and ssl_version == ssl.PROTOCOL_TLS:
+            send_telegram_notification(domain, f"{version_name} is not supported")
+
+def check_tls_version(domain, ssl_version):
+    try:
+        context = ssl.SSLContext(ssl_version)
+        conn = context.wrap_socket(socket.socket(socket.AF_INET), server_hostname=domain)
+        conn.settimeout(5.0)
+        conn.connect((domain, 443))
+        conn.close()
+        return True
+    except ssl.SSLError:
+        return False
+    except socket.error:
+        return False
 
 def is_cert_expiring_soon(cert):
     now = datetime.utcnow()
